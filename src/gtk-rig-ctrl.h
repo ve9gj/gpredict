@@ -40,7 +40,7 @@ struct _gtk_rig_ctrl {
 
     /* target status labels */
     GtkWidget      *SatAz, *SatEl, *SatCnt;
-    GtkWidget      *SatRng, *SatRngRate, *SatDop;
+    GtkWidget      *SatRng, *SatRngRate, *SatDop, *SatMode, *SatPassbandLow, *SatPassbandHigh, *bar;
 
     /* other widgets */
     GtkWidget      *SatSel;     /*!< Satellite selector */

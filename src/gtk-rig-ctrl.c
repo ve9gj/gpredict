@@ -269,6 +269,7 @@ void gtk_rig_ctrl_update(GtkRigCtrl * ctrl, gdouble t)
 {
     gdouble         satfreq;
     gchar          *buff;
+	gdouble			passbandlow, passbandhigh, radiodown;
 
     g_mutex_lock(&ctrl->rig_ctrl_updatelock);
 
@@ -305,6 +306,33 @@ void gtk_rig_ctrl_update(GtkRigCtrl * ctrl, gdouble t)
         }
         gtk_label_set_text(GTK_LABEL(ctrl->SatRngRate), buff);
         g_free(buff);
+
+		if (ctrl->trsp)
+        {
+            /* Set Display Transponder Mode */
+            gtk_label_set_text(GTK_LABEL(ctrl->SatMode), ctrl->trsp->mode);
+
+            /* Set Display Transponder Low Downlink Freq */
+            passbandlow = (double)ctrl->trsp->downlow * .000001;
+            buff = g_strdup_printf(" %.3f mhz <-", passbandlow);
+            gtk_label_set_text(GTK_LABEL(ctrl->SatPassbandLow), buff);
+
+            /* Set Display Transponder High Downlink Freq */
+            passbandhigh = (double)ctrl->trsp->downhigh * .000001;
+            buff = g_strdup_printf("--> %.3f mhz ", passbandhigh);
+            gtk_label_set_text(GTK_LABEL(ctrl->SatPassbandHigh), buff);
+            g_free(buff);
+
+            /* Set Progress bar to where we are in Passband */
+            radiodown = gtk_freq_knob_get_value(GTK_FREQ_KNOB(ctrl->SatFreqDown));
+            if (radiodown <=  (double)ctrl->trsp->downlow){
+                gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (ctrl->bar), .0);
+            } else if (radiodown >=  (double)ctrl->trsp->downhigh){
+                gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (ctrl->bar), 1);
+            } else if (ctrl->trsp->downhigh > 0 ) {
+                gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (ctrl->bar), (radiodown -(double)ctrl->trsp->downlow) / ((double)ctrl->trsp->downhigh -(double)ctrl->trsp->downlow)) ;
+            }
+        }
 
         /* Doppler shift down */
         satfreq = gtk_freq_knob_get_value(GTK_FREQ_KNOB(ctrl->SatFreqDown));
@@ -1152,6 +1180,21 @@ static GtkWidget *create_target_widgets(GtkRigCtrl * ctrl)
     gtk_widget_set_tooltip_text(ctrl->SatRngRate,
                                 _("The rate of change for the distance between"
                                   " the satellite and the observer."));
+	/* Passband Mode/Range & Tuning bar Display*/
+    g_object_set(label, "xalign", 1.0f, "yalign", 0.5f, NULL);
+    gtk_grid_attach(GTK_GRID(table), label, 0, 4, 1, 1);
+	ctrl->SatMode = gtk_label_new("0.0 km/s");
+    g_object_set(ctrl->SatMode, "xalign", 0.0f, "yalign", 0.5f, NULL);
+    gtk_grid_attach(GTK_GRID(table), ctrl->SatMode, 1, 4, 1, 1);
+	ctrl->SatPassbandLow = gtk_label_new("0.0 km/s");
+    g_object_set(ctrl->SatPassbandLow, "xalign", 0.0f, "yalign", 0.5f, NULL);
+    gtk_grid_attach(GTK_GRID(table), ctrl->SatPassbandLow, 2, 4, 1, 1);
+	ctrl->SatPassbandHigh = gtk_label_new("0.0 km/s");
+    g_object_set(ctrl->SatPassbandHigh, "xalign", 0.0f, "yalign", 0.5f, NULL);
+    gtk_grid_attach(GTK_GRID(table), ctrl->SatPassbandHigh, 3, 4, 1, 1);
+    ctrl->bar = gtk_progress_bar_new ();
+    gtk_grid_attach(GTK_GRID(table), ctrl->bar, 0,5,4, 1);
+	gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (ctrl->bar), .5);
 
     frame = gtk_frame_new(_("Target"));
     gtk_container_add(GTK_CONTAINER(frame), table);
