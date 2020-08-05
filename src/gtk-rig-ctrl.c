@@ -1,5 +1,5 @@
 /*
-  Gpredict: Real-time satellite tracking and orbit prediction program
+	Gpredict: Real-time satellite tracking and orbit prediction program
 
   Copyright (C)  2001-2019  Alexandru Csete, OZ9AEC
   Copyright (C)       2017  Patrick Dohmen, DL4PD
@@ -40,6 +40,7 @@
 #include <glib/gi18n.h>
 #include <gtk/gtk.h>
 #include <math.h>
+#include <glib/gprintf.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -79,7 +80,7 @@ static void     exec_duplex_cycle(GtkRigCtrl * ctrl);
 static void     exec_duplex_tx_cycle(GtkRigCtrl * ctrl);
 static void     exec_dual_rig_cycle(GtkRigCtrl * ctrl);
 static gboolean check_aos_los(GtkRigCtrl * ctrl);
-static gboolean set_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble freq);
+static gboolean set_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble freq, gint line);
 static gboolean get_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble * freq);
 static gboolean set_freq_toggle(GtkRigCtrl * ctrl, gint sock, gdouble freq);
 static gboolean set_toggle(GtkRigCtrl * ctrl, gint sock);
@@ -87,6 +88,7 @@ static gboolean unset_toggle(GtkRigCtrl * ctrl, gint sock);
 static gboolean get_freq_toggle(GtkRigCtrl * ctrl, gint sock, gdouble * freq);
 static gboolean get_ptt(GtkRigCtrl * ctrl, gint sock);
 static gboolean set_ptt(GtkRigCtrl * ctrl, gint sock, gboolean ptt);
+static void sat_selected_cb(GtkComboBox * satsel, gpointer data);
 static gboolean send_rigctld_commands(GtkRigCtrl * ctrl, gint sock,
                                       gchar * buff, gchar * buffout,
                                       gint sizeout);
@@ -99,13 +101,16 @@ static void     setconfig(gpointer data);
 static void     remove_timer(GtkRigCtrl * data);
 static void     start_timer(GtkRigCtrl * data);
 
+static void loadsatprefs(GtkRigCtrl * ctrl);
+static void savelastsat(GtkRigCtrl * ctrl);
+
 static GtkBoxClass *parent_class = NULL;
 
 
 static void gtk_rig_ctrl_destroy(GtkWidget * widget)
 {
     GtkRigCtrl     *ctrl = GTK_RIG_CTRL(widget);
-
+    
     if (ctrl->rigctl_thread != NULL)
     {
         g_mutex_lock(&ctrl->widgetsync);
@@ -177,7 +182,9 @@ static void gtk_rig_ctrl_init(GtkRigCtrl * ctrl)
     ctrl->lasttxptt = TRUE;
     ctrl->lastrxf = 0.0;
     ctrl->lasttxf = 0.0;
-    ctrl->last_toggle_tx = -1;
+    ctrl->last_toggle_tx = -1;  
+    loadsatprefs(ctrl); 
+       
 }
 
 GType gtk_rig_ctrl_get_type()
@@ -605,6 +612,51 @@ static GtkWidget *create_uplink_widgets(GtkRigCtrl * ctrl)
     return frame;
 }
 
+/*  (VE9GJ) Load SatPrefs.cfg into Gkey ctrl->SatPrefs
+ *  then clone SatPrefs into tmpSatPrefs which will hold all data while 
+ *  "radio control" is open. SatPrefs is only saved to SatPrefs.cfg when
+ *  selecting a new Sat under the Last group
+ */
+				
+static void loadsatprefs(GtkRigCtrl * ctrl)
+{
+	GError 	*error = NULL;
+	gchar	*data;
+	gchar	*cfgdir, *filename;
+	gsize 	*length = NULL;
+	cfgdir = get_user_conf_dir();
+	filename = g_strconcat(cfgdir, G_DIR_SEPARATOR_S, "SatPrefs.cfg", NULL);	
+	ctrl->SatPrefs = g_key_file_new();
+	ctrl->tmpSatPrefs = g_key_file_new();   
+    if(!g_key_file_load_from_file(ctrl->SatPrefs,
+                                  filename,
+                                  G_KEY_FILE_KEEP_COMMENTS | 
+                                  G_KEY_FILE_KEEP_TRANSLATIONS,
+                                  &error))
+    {
+        g_printf("Error Loading SatPrefs.cfg:%s\n", error->message);
+        g_error_free(error);
+        error = NULL;
+        return;
+    }       
+    data = g_key_file_to_data (ctrl->SatPrefs, length, &error);
+    if (error != NULL)
+    {
+		g_printf("Error SatPrefs to data:%s\n", error->message);
+        g_error_free(error);
+        error = NULL;
+        return;
+	}     
+    if(!g_key_file_load_from_data (ctrl->tmpSatPrefs, data, -1, G_KEY_FILE_NONE, &error))
+    {
+		g_printf("Error cloning tmpSatPrefs:%s\n", error->message);
+		g_error_free(error);
+        error = NULL;
+        return;
+        
+	}  
+	g_printf("Loaded SatPrefs OK\n");   
+}	
 
 static void load_trsp_list(GtkRigCtrl * ctrl)
 {
@@ -650,9 +702,6 @@ static void load_trsp_list(GtkRigCtrl * ctrl)
                     _("%s:%s: Read transponder '%s' for satellite %d"),
                     __FILE__, __func__, trsp->name, ctrl->target->tle.catnr);
     }
-
-    ctrl->trsp = (trsp_t *) g_slist_nth_data(ctrl->trsplist, 0);
-    gtk_combo_box_set_active(GTK_COMBO_BOX(ctrl->TrspSel), 0);
 }
 
 static gboolean have_conf()
@@ -694,7 +743,14 @@ static gboolean have_conf()
 static void sat_selected_cb(GtkComboBox * satsel, gpointer data)
 {
     GtkRigCtrl     *ctrl = GTK_RIG_CTRL(data);
-    gint            i;
+    gint            i, n, txoffsethzsaved;
+    gchar			*satname, *trspsaved, *device1saved, *device2saved, *tmp, *tmp2;
+    GError			*error = NULL;
+    trsp_t         *trsp = NULL;
+	
+    
+    satname = gtk_combo_box_text_get_active_text (GTK_COMBO_BOX_TEXT(satsel));
+    //g_printf("Selected Sat: %s\n", satname);
 
     i = gtk_combo_box_get_active(satsel);
     if (i >= 0)
@@ -711,6 +767,115 @@ static void sat_selected_cb(GtkComboBox * satsel, gpointer data)
 
         /* read transponders for new target */
         load_trsp_list(ctrl);
+				
+        /* save this to SatPrefs as last sat*/        
+        g_key_file_set_string(ctrl->SatPrefs, "Last", "sat", gtk_combo_box_text_get_active_text (GTK_COMBO_BOX_TEXT(satsel)));
+		
+        /* do we have a trsp saved in SatPrefs for this sat? */
+        trspsaved = g_key_file_get_string(ctrl->SatPrefs,satname,"trsp", &error);
+		if(error != NULL)
+		{
+			g_printf("Error getting saved trsp for sat %s:%s\n", satname, error->message);			
+			g_clear_error (&error);
+		}
+		if(trspsaved != NULL)
+		{
+			n = g_slist_length(ctrl->trsplist);
+			for (int i=0; i<n; i++) {
+				trsp = (trsp_t *) g_slist_nth_data(ctrl->trsplist, i);
+				if (!g_strcmp0(trsp->name, trspsaved))
+				{
+					gtk_combo_box_set_active(GTK_COMBO_BOX(ctrl->TrspSel), i);
+				}
+			}
+		}
+		else
+		{
+				gtk_combo_box_set_active(GTK_COMBO_BOX(ctrl->TrspSel), 0);
+		}
+		 /* do we have a Device1 saved in SatPrefs for this sat? */
+        device1saved = g_key_file_get_string(ctrl->SatPrefs,satname,"device1", &error);
+		if(error != NULL)
+		{
+			g_printf("Error getting saved Device1 for sat %s:%s\n", satname, error->message);			
+			g_clear_error (&error);
+			gtk_combo_box_set_active(GTK_COMBO_BOX(ctrl->DevSel), 0);			
+		}
+		if(device1saved != NULL)
+		{
+			tmp = NULL;
+			for (int i=0; i<20; i++)
+			{
+				tmp2 = g_strdup_printf("Device1_%i", i);
+				tmp = g_key_file_get_string(ctrl->tmpSatPrefs,"Device1", tmp2, &error);
+				if(error != NULL)
+				{
+					g_printf("Error getting  Dev1 list %s %s\n", tmp2, error->message);			
+					g_clear_error (&error);
+				}
+				if(tmp != NULL)
+				{
+					if(!g_strcmp0(device1saved, tmp))
+					{
+						gtk_combo_box_set_active(GTK_COMBO_BOX(ctrl->DevSel), i);
+						break;
+					}
+				}
+				else
+				{
+					gtk_combo_box_set_active(GTK_COMBO_BOX(ctrl->DevSel), 0);
+					break;
+				}
+			}
+			
+		}
+		 /* do we have a Device2 saved in SatPrefs for this sat? */
+        device2saved = g_key_file_get_string(ctrl->SatPrefs,satname,"device2", &error);
+		if(error != NULL)
+		{
+			g_printf("Error getting Device2 for sat %s:%s\n", satname, error->message);			
+			g_clear_error (&error);
+		}
+		if(device2saved != NULL)
+		{
+			tmp = NULL;
+			for (int i=0; i<20; i++)
+		{
+				tmp2 = g_strdup_printf("Device2_%i", i);
+				tmp = g_key_file_get_string(ctrl->tmpSatPrefs,"Device2", tmp2, &error);
+				if(error != NULL)
+				{
+					g_printf("%i: Error!!! getting  Dev1 list %s %s\n", i,tmp2, error->message);				
+					g_clear_error (&error);
+				}
+				if(tmp != NULL)
+				{
+					if(!g_strcmp0(device2saved, tmp))
+					{
+						gtk_combo_box_set_active(GTK_COMBO_BOX(ctrl->DevSel2), i);
+						break;
+					}
+				}
+				else
+				{
+					gtk_combo_box_set_active(GTK_COMBO_BOX(ctrl->DevSel2), 0);
+					break;
+				}
+			}
+			
+		}
+	    /* do we have a txhzoffset saved in SatPrefs for this sat? */
+        txoffsethzsaved = g_key_file_get_integer(ctrl->SatPrefs,satname,"txOffsetHz", &error); // returns 0 if not found
+		if(error != NULL)
+		{
+			g_printf("Error getting txOffsetHz for sat %s:%s\n", satname, error->message);			
+			g_clear_error (&error);
+			txoffsethzsaved = 0; 
+		}	
+		gtk_spin_button_set_value(GTK_SPIN_BUTTON(ctrl->txOffsetHz_spin), (gdouble) txoffsethzsaved );
+		ctrl->txOffsetHz = (gint) gtk_spin_button_get_value(GTK_SPIN_BUTTON(ctrl->txOffsetHz_spin));
+		/* save sat as last sat in SatPrefs */
+        savelastsat(ctrl);
     }
     else
     {
@@ -860,10 +1025,20 @@ static void delay_changed_cb(GtkSpinButton * spin, gpointer data)
         start_timer(ctrl);
 }
 
+/* User adjusted the txoffset */
+static void txoffsethz_changed_cb(GtkSpinButton * spin, gpointer data)
+{
+	GtkRigCtrl     *ctrl = GTK_RIG_CTRL(data);
+	
+	ctrl->txOffsetHz = (gint) gtk_spin_button_get_value(spin);
+	    
+}
+
 static void primary_rig_selected_cb(GtkComboBox * box, gpointer data)
 {
     GtkRigCtrl     *ctrl = GTK_RIG_CTRL(data);
     gchar          *buff;
+	gdouble			passbandlow, passbandhigh, radiodown;
 
     sat_log_log(SAT_LOG_LEVEL_DEBUG,
                 _("%s:%s: Primary device selected: %d"),
@@ -1054,35 +1229,72 @@ static void rig_engaged_cb(GtkToggleButton * button, gpointer data)
     }
 }
 
+/* (VE9GJ) user wants to save setting for this sat */
+static void savebut_cb(GtkToggleButton * button, gpointer data)
+{
+	gchar		   *satname;
+    GtkRigCtrl     *ctrl = GTK_RIG_CTRL(data);
+    (void) button;    
+ 	satname = gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(ctrl->SatSel));
+	g_printf("Saving sat: %s to SatPrefs\n", satname);
+	g_key_file_set_string(ctrl->SatPrefs, satname, "trsp", gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(ctrl->TrspSel)));
+	g_key_file_set_string(ctrl->tmpSatPrefs, satname, "trsp", gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(ctrl->TrspSel)));
+	g_key_file_set_string(ctrl->SatPrefs, satname, "device1", gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(ctrl->DevSel)));
+	g_key_file_set_string(ctrl->tmpSatPrefs, satname, "device1", gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(ctrl->DevSel)));
+	g_key_file_set_string(ctrl->SatPrefs, satname, "device2", gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(ctrl->DevSel2)));
+	g_key_file_set_string(ctrl->tmpSatPrefs, satname, "device2", gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(ctrl->DevSel2)));
+	g_key_file_set_integer(ctrl->SatPrefs, satname, "txOffsetHz", gtk_spin_button_get_value(GTK_SPIN_BUTTON(ctrl->txOffsetHz_spin)));
+	g_key_file_set_integer(ctrl->tmpSatPrefs, satname, "txOffsetHz", gtk_spin_button_get_value(GTK_SPIN_BUTTON(ctrl->txOffsetHz_spin)));
+	
+	savelastsat(ctrl);
+    
+    
+}
+
 static GtkWidget *create_target_widgets(GtkRigCtrl * ctrl)
 {
     GtkWidget      *frame, *table, *label, *track;
     GtkWidget      *tune, *trsplock, *hbox;
-    gchar          *buff;
-    guint           i, n;
+    gchar          *buff,  *lastsatname;
+    guint           i, n, lastsatindex;
     sat_t          *sat = NULL;
-
+	GError		   *error;
     buff = g_strdup_printf(AZEL_FMTSTR, 0.0);
 
     table = gtk_grid_new();
     gtk_container_set_border_width(GTK_CONTAINER(table), 5);
     gtk_grid_set_column_spacing(GTK_GRID(table), 5);
     gtk_grid_set_row_spacing(GTK_GRID(table), 5);
-
+    
+	lastsatname = g_key_file_get_string(ctrl->SatPrefs,"Last","sat", &error);
+	if(error)
+	{
+		g_printf("Error getting last sat:%s\n", error->message);
+		lastsatname = NULL;
+		error = NULL;
+	}
+	lastsatindex = 	0;
     /* sat selector */
-    ctrl->SatSel = gtk_combo_box_text_new();
+    ctrl->SatSel = gtk_combo_box_text_new();    
     n = g_slist_length(ctrl->sats);
     for (i = 0; i < n; i++)
-    {
+    { 
         sat = SAT(g_slist_nth_data(ctrl->sats, i));
         if (sat)
             gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(ctrl->SatSel),
                                            sat->nickname);
-    }
-
-    gtk_combo_box_set_active(GTK_COMBO_BOX(ctrl->SatSel), 0);
+        /* get the index that matches lastsatname from SatPrefs if a last sat exists*/
+        if (lastsatname != NULL)
+        {
+			if(g_ascii_strcasecmp ( lastsatname, sat->nickname) == 0) 
+			{
+				lastsatindex = 	i;
+			}
+		}
+    }    
+    gtk_combo_box_set_active(GTK_COMBO_BOX(ctrl->SatSel), lastsatindex);
     gtk_widget_set_tooltip_text(ctrl->SatSel, _("Select target object"));
-    g_signal_connect(ctrl->SatSel, "changed", G_CALLBACK(sat_selected_cb),
+    g_signal_connect(GTK_COMBO_BOX(ctrl->SatSel), "changed", G_CALLBACK(sat_selected_cb),
                      ctrl);
     gtk_grid_attach(GTK_GRID(table), ctrl->SatSel, 0, 0, 3, 1);
 
@@ -1101,8 +1313,7 @@ static GtkWidget *create_target_widgets(GtkRigCtrl * ctrl)
     load_trsp_list(ctrl);
     g_signal_connect(ctrl->TrspSel, "changed", G_CALLBACK(trsp_selected_cb),
                      ctrl);
-    gtk_grid_attach(GTK_GRID(table), ctrl->TrspSel, 0, 1, 3, 1);
-
+    gtk_grid_attach(GTK_GRID(table), ctrl->TrspSel, 0, 1, 3, 1);    
     /* buttons */
     tune = gtk_button_new_with_label(_("T"));
     gtk_widget_set_tooltip_text(tune,
@@ -1289,7 +1500,7 @@ static GtkWidget *create_conf_widgets(GtkRigCtrl * ctrl)
         /* read each .rig file */
         GSList         *rigs = NULL;
         gint            i;
-        gint            n;
+        gint            n;		
 
         while ((filename = g_dir_read_name(dir)))
         {
@@ -1301,7 +1512,7 @@ static GtkWidget *create_conf_widgets(GtkRigCtrl * ctrl)
                 g_strfreev(vbuff);
             }
         }
-        n = g_slist_length(rigs);
+        n = g_slist_length(rigs);		
         for (i = 0; i < n; i++)
         {
             rigname = g_slist_nth_data(rigs, i);
@@ -1309,6 +1520,8 @@ static GtkWidget *create_conf_widgets(GtkRigCtrl * ctrl)
             {
                 gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT
                                                (ctrl->DevSel), rigname);
+				/* Save list to tmpSatPrefs for later use */
+				g_key_file_set_string(ctrl->tmpSatPrefs, "Device1", g_strdup_printf("Device1_%i", i), rigname);
                 g_free(rigname);
             }
         }
@@ -1343,21 +1556,25 @@ static GtkWidget *create_conf_widgets(GtkRigCtrl * ctrl)
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(ctrl->DevSel2),
                                    _("None"));
     gtk_combo_box_set_active(GTK_COMBO_BOX(ctrl->DevSel2), 0);
-
+    g_key_file_set_string(ctrl->tmpSatPrefs, "Device2","Device2_0", "None");
     dir = g_dir_open(dirname, 0, &error);
     if (dir)
     {
         /* read each .rig file */
+        int i = 1;
         while ((filename = g_dir_read_name(dir)))
         {
             if (g_str_has_suffix(filename, ".rig"))
             {
                 /* only add TX capable rigs */
-                vbuff = g_strsplit(filename, ".rig", 0);
+                vbuff = g_strsplit(filename, ".rig", 0);				
                 if (is_rig_tx_capable(vbuff[0]))
                 {
                     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT
                                                    (ctrl->DevSel2), vbuff[0]);
+					/* Save list to tmpSatPrefs for later use */
+					g_key_file_set_string(ctrl->tmpSatPrefs, "Device2", g_strdup_printf("Device2_%i", i), vbuff[0]);
+					i++;
                 }
                 g_strfreev(vbuff);
             }
@@ -1403,12 +1620,36 @@ static GtkWidget *create_conf_widgets(GtkRigCtrl * ctrl)
     label = gtk_label_new(_("msec"));
     g_object_set(label, "xalign", 0.0f, "yalign", 0.5f, NULL);
     gtk_grid_attach(GTK_GRID(table), label, 2, 3, 1, 1);
-
+    
+    /* (VE9GJ) txoffset and save setting to SatPrefs */ 
+    ctrl->SaveBut = gtk_button_new_with_label(_("Save Sat"));
+    gtk_widget_set_tooltip_text(GTK_WIDGET(ctrl->SaveBut),
+                                _("Save this Sat settings"));
+    g_signal_connect(ctrl->SaveBut, "clicked", G_CALLBACK(savebut_cb),
+                     ctrl);
+    gtk_grid_attach(GTK_GRID(table), GTK_WIDGET(ctrl->SaveBut), 0, 4, 1, 1);
+     
+	ctrl->txOffsetHz_spin = gtk_spin_button_new_with_range(-10000, +10000, 10);
+    gtk_spin_button_set_digits(GTK_SPIN_BUTTON(ctrl->txOffsetHz_spin), 0);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(ctrl->txOffsetHz_spin), 0);
+    gtk_widget_set_tooltip_text(ctrl->txOffsetHz_spin,
+                                _("This parameter controls the amount of hz to offset the "
+                                  "tx freq sent to the rig to allow for a slight mismatch between radios. " 
+								  "This offset will only be applied when the LOCK button is engaged"));
+    g_signal_connect(ctrl->txOffsetHz_spin, "value-changed",
+                     G_CALLBACK(txoffsethz_changed_cb), ctrl);
+    gtk_grid_attach(GTK_GRID(table), ctrl->txOffsetHz_spin, 1, 4, 1, 1);
+    
+    label = gtk_label_new(_("hz"));
+    g_object_set(label, "xalign", 0.0f, "yalign", 0.5f, NULL);
+    gtk_grid_attach(GTK_GRID(table), label, 2, 4, 1, 1);
+    
     frame = gtk_frame_new(_("Settings"));
     gtk_container_add(GTK_CONTAINER(frame), table);
 
     /* load primary config */
     primary_rig_selected_cb(GTK_COMBO_BOX(ctrl->DevSel), ctrl);
+	sat_selected_cb(GTK_COMBO_BOX(ctrl->SatSel), ctrl); // Last Sat was set as active, now load any saved settings into remaining controls
 
     return frame;
 }
@@ -1748,7 +1989,7 @@ static void exec_rx_cycle(GtkRigCtrl * ctrl)
     if ((ctrl->engaged) && (ptt == FALSE) &&
         (fabs(ctrl->lastrxf - tmpfreq) >= 1.0))
     {
-        if (set_freq_simplex(ctrl, ctrl->sock, tmpfreq))
+        if (set_freq_simplex(ctrl, ctrl->sock, tmpfreq, __LINE__))
         {
             /* reset error counter */
             ctrl->errcnt = 0;
@@ -1871,7 +2112,7 @@ static void exec_tx_cycle(GtkRigCtrl * ctrl)
     if ((ctrl->engaged) && (ptt == TRUE) &&
         (fabs(ctrl->lasttxf - tmpfreq) >= 1.0))
     {
-        if (set_freq_simplex(ctrl, ctrl->sock, tmpfreq))
+        if (set_freq_simplex(ctrl, ctrl->sock, tmpfreq, __LINE__))
         {
             /* reset error counter */
             ctrl->errcnt = 0;
@@ -2175,7 +2416,7 @@ static void exec_dual_rig_cycle(GtkRigCtrl * ctrl)
         /* if device is engaged, send freq command to radio */
         if ((ctrl->engaged) && (fabs(ctrl->lasttxf - tmpfreq) >= 1.0))
         {
-            if (set_freq_simplex(ctrl, ctrl->sock2, tmpfreq))
+            if (set_freq_simplex(ctrl, ctrl->sock2, tmpfreq, __LINE__))
             {
                 /* reset error counter */
                 ctrl->errcnt = 0;
@@ -2215,7 +2456,7 @@ static void exec_dual_rig_cycle(GtkRigCtrl * ctrl)
         /* if device is engaged, send freq command to radio */
         if ((ctrl->engaged) && (fabs(ctrl->lastrxf - tmpfreq) >= 1.0))
         {
-            if (set_freq_simplex(ctrl, ctrl->sock, tmpfreq))
+            if (set_freq_simplex(ctrl, ctrl->sock, tmpfreq, __LINE__))
             {
                 /* reset error counter */
                 ctrl->errcnt = 0;
@@ -2295,7 +2536,7 @@ static void exec_dual_rig_cycle(GtkRigCtrl * ctrl)
             /* if device is engaged, send freq command to radio */
             if ((ctrl->engaged) && (fabs(ctrl->lastrxf - tmpfreq) >= 1.0))
             {
-                if (set_freq_simplex(ctrl, ctrl->sock, tmpfreq))
+                if (set_freq_simplex(ctrl, ctrl->sock, tmpfreq, __LINE__))
                 {
                     /* reset error counter */
                     ctrl->errcnt = 0;
@@ -2334,7 +2575,7 @@ static void exec_dual_rig_cycle(GtkRigCtrl * ctrl)
             /* if device is engaged, send freq command to radio */
             if ((ctrl->engaged) && (fabs(ctrl->lasttxf - tmpfreq) >= 1.0))
             {
-                if (set_freq_simplex(ctrl, ctrl->sock2, tmpfreq))
+                if (set_freq_simplex(ctrl, ctrl->sock2, tmpfreq, __LINE__))
                 {
                     /* reset error counter */
                     ctrl->errcnt = 0;
@@ -2523,12 +2764,12 @@ static gboolean check_aos_los(GtkRigCtrl * ctrl)
  *
  * Returns TRUE if the operation was successful, FALSE otherwise
  */
-static gboolean set_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble freq)
+static gboolean set_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble freq, gint line)
 {
     gchar          *buff;
     gchar           buffback[128];
     gboolean        retcode;
-
+    
     buff = g_strdup_printf("F %10.0f\x0a", freq);
     retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
     g_free(buff);
@@ -2862,17 +3103,30 @@ static gboolean close_rigctld_socket(gint * sock)
     return TRUE;
 }
 
+static void savelastsat(GtkRigCtrl * ctrl)
+{	
+	GError 	*error = NULL; 
+	gchar	*cfgdir, *filename;
+	cfgdir = get_user_conf_dir();	 
+	filename = g_strconcat(cfgdir, G_DIR_SEPARATOR_S, "SatPrefs.cfg", NULL);	 
+    if(!g_key_file_save_to_file (ctrl->SatPrefs, filename, &error))
+    {
+        g_printf("Error saving last sat to SatPrefs.cfg:%s\n", error->message);
+        g_error_free(error);
+        error = NULL;
+        return;
+    } 
+}
+
 static void rigctrl_close(GtkRigCtrl * data)
 {
-    GtkRigCtrl     *ctrl = GTK_RIG_CTRL(data);
-
+    GtkRigCtrl     *ctrl = GTK_RIG_CTRL(data); 
     ctrl->lastrxptt = FALSE;
     ctrl->lasttxptt = TRUE;
     ctrl->lasttxf = 0.0;
-    ctrl->lastrxf = 0.0;
-
+    ctrl->lastrxf = 0.0;    
     remove_timer(ctrl);
-
+        
     if ((ctrl->conf->type == RIG_TYPE_TOGGLE_AUTO) ||
         (ctrl->conf->type == RIG_TYPE_TOGGLE_MAN))
     {
@@ -3090,6 +3344,7 @@ void setconfig(gpointer data)
 }
 
 
+
 GtkWidget      *gtk_rig_ctrl_new(GtkSatModule * module)
 {
     GtkRigCtrl     *rigctrl;
@@ -3100,10 +3355,10 @@ GtkWidget      *gtk_rig_ctrl_new(GtkSatModule * module)
         return NULL;
 
     widget = g_object_new(GTK_TYPE_RIG_CTRL, NULL);
-    rigctrl = GTK_RIG_CTRL(widget);
+    rigctrl = GTK_RIG_CTRL(widget);    
 
     g_signal_connect(widget, "key-press-event", G_CALLBACK(key_press_cb),
-                     NULL);
+                     NULL);    
 
     g_hash_table_foreach(module->satellites, store_sats, widget);
     GTK_RIG_CTRL(widget)->target = SAT(g_slist_nth_data(rigctrl->sats, 0));
@@ -3136,8 +3391,7 @@ GtkWidget      *gtk_rig_ctrl_new(GtkSatModule * module)
     gtk_grid_attach(GTK_GRID(table), create_count_down_widgets(rigctrl),
                     0, 2, 2, 1);
 
-    gtk_container_add(GTK_CONTAINER(rigctrl), table);
-
+    gtk_container_add(GTK_CONTAINER(rigctrl), table);	
     if (module->target > 0)
         gtk_rig_ctrl_select_sat(rigctrl, module->target);
 

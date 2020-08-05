@@ -40,8 +40,15 @@ struct _gtk_rig_ctrl {
 
     /* target status labels */
     GtkWidget      *SatAz, *SatEl, *SatCnt;
-    GtkWidget      *SatRng, *SatRngRate, *SatDop, *SatMode, *SatPassbandLow, *SatPassbandHigh, *bar;
-
+    GtkWidget      *SatRng, *SatRngRate, *SatDop;
+	
+    /* VE9GJ mods */ 
+    GtkWidget	*SatMode, *SatPassbandLow, *SatPassbandHigh, *bar;    
+    GKeyFile	   *SatPrefs, *tmpSatPrefs;
+    GtkWidget      *txOffsetHz_spin;
+    gint		   txOffsetHz;
+    GtkWidget 	   *SaveBut;
+	
     /* other widgets */
     GtkWidget      *SatSel;     /*!< Satellite selector */
     GtkWidget      *TrspSel;    /*!< Transponder selector */
@@ -96,6 +103,7 @@ struct _gtk_rig_ctrl {
     GCond           widgetready;        /*!< Condition when work is done (sync stuff) */
     GAsyncQueue    *rigctlq;    /*!< Message queue to indicate something has changed */
     GThread        *rigctl_thread;      /*!< Pointer to current rigctl-thread */
+    
 };
 
 struct _GtkRigCtrlClass {
