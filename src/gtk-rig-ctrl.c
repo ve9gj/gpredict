@@ -2090,6 +2090,20 @@ static void exec_tx_cycle(GtkRigCtrl * ctrl)
      */
     satfreqd = gtk_freq_knob_get_value(GTK_FREQ_KNOB(ctrl->SatFreqDown));
     satfrequ = gtk_freq_knob_get_value(GTK_FREQ_KNOB(ctrl->SatFreqUp));
+	/* VE9GJ --> */
+	satfrequ = satfrequ - ctrl->lasttxoffset;
+	if (ctrl->trsplock)
+	{
+		g_printf("Applying offset to tx:%f + %f\n", satfrequ, ctrl->txOffsetHz);
+		satfrequ = satfrequ + ctrl->txOffsetHz;
+		ctrl->lasttxoffset = ctrl->txOffsetHz;
+		
+	}
+	else
+	{
+		ctrl->lasttxoffset = 0;
+	}
+	/* VE9GJ <-- */
     if (ctrl->tracking)
     {
         /* downlink */
