@@ -83,6 +83,7 @@ struct _gtk_rig_ctrl {
 
     gdouble         lastrxf;    /*!< Last frequency sent to receiver. */
     gdouble         lasttxf;    /*!< Last frequency sent to tranmitter. */
+	gdouble         lasttxoffset;    /*!< Last offset frequency applied to txfreq. */
     gdouble         du, dd;     /*!< Last computed up/down Doppler shift; computed in update() */
 
     glong           last_toggle_tx;     /*!< Last time when exec_toggle_tx_cycle() was executed (seconds)

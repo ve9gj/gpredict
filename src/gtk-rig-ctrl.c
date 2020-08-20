@@ -182,6 +182,7 @@ static void gtk_rig_ctrl_init(GtkRigCtrl * ctrl)
     ctrl->lasttxptt = TRUE;
     ctrl->lastrxf = 0.0;
     ctrl->lasttxf = 0.0;
+	ctrl->lasttxoffset = 0.0;
     ctrl->last_toggle_tx = -1;  
     loadsatprefs(ctrl); 
        
