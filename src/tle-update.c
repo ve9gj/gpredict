@@ -309,7 +309,8 @@ void tle_update_from_files(const gchar * dir, const gchar * filter,
                         {
                             /* two different calculations for completeness depending on whether 
                                we are adding new satellites or not. */
-                            if (sat_cfg_get_bool(SAT_CFG_BOOL_TLE_ADD_NEW))
+                            // ve9gj if (sat_cfg_get_bool(SAT_CFG_BOOL_TLE_ADD_NEW))
+                            if (TRUE)
                             {
                                 /* In this case we are possibly processing more than num satellites
                                    How many more? We do not know yet.  Worst case is g_hash_table_size more.
@@ -373,7 +374,8 @@ void tle_update_from_files(const gchar * dir, const gchar * filter,
             g_dir_close(loc_dir);
 
             /* see if we have any new sats that need to be added */
-            if (sat_cfg_get_bool(SAT_CFG_BOOL_TLE_ADD_NEW))
+            // ve9gj if (sat_cfg_get_bool(SAT_CFG_BOOL_TLE_ADD_NEW))
+            if (TRUE)
             {
                 newsats = add_new_sats(data);
 
