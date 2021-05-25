@@ -99,8 +99,6 @@ static void update_autotrack(GtkSatModule * module)
     next_aos = module->tmgCdnum + 10.f; /* hope there is AOS within 10 days */
     next_sat = module->target;
 
-    maxdt = (gdouble) sat_cfg_get_int(SAT_CFG_INT_PRED_LOOK_AHEAD);
-
     i = 0;
     while (i++ < n)
     {
@@ -116,26 +114,8 @@ static void update_autotrack(GtkSatModule * module)
         /* we have a candidate if AOS is in the future */
         if (sat->aos > module->tmgCdnum && sat->aos < next_aos)
         {
-            /* sat->aos is at the horizon, not rigs desired elevation for AOS,
-               so we calculate when the next pass at the desired elevation is */
-            if (aos_el != 0.0)
-            {
-                pass_t *pass;
-
-                /* Should we avoid recalculating this? */
-                pass = get_next_pass_el(sat, module->qth, maxdt, aos_el);
-                if ((pass != NULL) && (pass->aos < next_aos))
-                {
-                    next_aos = pass->aos;
-                    next_sat = sat->tle.catnr;
-                    free_pass (pass);
-                }
-            }
-            else
-            {
-                next_aos = sat->aos;
-                next_sat = sat->tle.catnr;
-            }
+            next_aos = sat->aos;
+            next_sat = sat->tle.catnr;
         }
 
         iter = iter->next;
