@@ -80,28 +80,13 @@ static void update_autotrack(GtkSatModule * module)
     guint           i, n;
     double          next_aos;
     gint            next_sat;
-    double          aos_el;
-    double          los_el;
-    gdouble         maxdt;
-
-    /* Get AOS/LOS elevation for rig */
-    aos_el = 0.0;
-    los_el = 0.0;
-    if (module->rigctrl != NULL)
-    {
-        GtkRigCtrl *ctrl = GTK_RIG_CTRL(module->rigctrl);
-        if ((ctrl != NULL) && (ctrl->conf != NULL))
-        {
-            aos_el = ctrl->conf->aos_el;
-            los_el = ctrl->conf->los_el;
-        }
-    }
+    int             min_ele = sat_cfg_get_int(SAT_CFG_INT_PRED_MIN_EL);
 
     if (module->target > 0)
         sat = g_hash_table_lookup(module->satellites, &module->target);
 
     /* do nothing if current target is still above horizon */
-    if (sat != NULL && sat->el > los_el)
+    if (sat != NULL && sat->el > min_ele)
         return;
 
     /* set target to satellite with next AOS */
@@ -122,7 +107,7 @@ static void update_autotrack(GtkSatModule * module)
         sat = (sat_t *) iter->data;
 
         /* if sat is above horizon, select it and we are done */
-        if (sat->el > aos_el)
+        if (sat->el > min_ele)
         {
             next_sat = sat->tle.catnr;
             break;
@@ -170,6 +155,8 @@ static void update_autotrack(GtkSatModule * module)
 static void gtk_sat_module_destroy(GtkWidget * widget)
 {
     GtkSatModule   *module = GTK_SAT_MODULE(widget);
+    GtkWidget      *view;
+    guint           i;
 
     /*save the configuration */
     mod_cfg_save(module->name, module->cfgdata);
@@ -204,6 +191,14 @@ static void gtk_sat_module_destroy(GtkWidget * widget)
         gtk_widget_destroy(module->skgwin);
     }
 
+    /* destroy views */
+    for (i = 0; i < module->nviews; i++)
+    {
+        view = GTK_WIDGET(g_slist_nth_data(module->views, i));
+        gtk_widget_destroy(view);
+    }
+    module->nviews = 0;
+
     /* clean up QTH */
     if (module->qth)
     {
@@ -224,14 +219,15 @@ static void gtk_sat_module_destroy(GtkWidget * widget)
         module->grid = NULL;
     }
 
-    /* FIXME: free module->views? */
-
     (*GTK_WIDGET_CLASS(parent_class)->destroy) (widget);
 }
 
-static void gtk_sat_module_class_init(GtkSatModuleClass * class)
+static void gtk_sat_module_class_init(GtkSatModuleClass * class,
+				      gpointer class_data)
 {
     GtkWidgetClass    *widget_class;
+
+    (void)class_data;
 
     widget_class = (GtkWidgetClass *) class;
     widget_class->destroy = gtk_sat_module_destroy;
@@ -239,8 +235,11 @@ static void gtk_sat_module_class_init(GtkSatModuleClass * class)
 }
 
 /** Initialise GtkSatModule widget */
-static void gtk_sat_module_init(GtkSatModule * module)
+static void gtk_sat_module_init(GtkSatModule * module,
+				gpointer g_class)
 {
+    (void)g_class;
+
     /* initialise data structures */
     module->win = NULL;
 
@@ -1292,7 +1291,7 @@ void gtk_sat_module_config_cb(GtkWidget * button, gpointer data)
     }
     else
     {
-        module->timerid = -1;
+        module->timerid = 0;
         retcode = mod_cfg_edit(name, module->cfgdata, toplevel);
         if (retcode == MOD_CFG_OK)
         {
@@ -1405,16 +1404,6 @@ void gtk_sat_module_config_cb(GtkWidget * button, gpointer data)
     g_free(name);
 }
 
-static gboolean empty(gpointer key, gpointer val, gpointer data)
-{
-    (void)key;
-    (void)val;
-    (void)data;
-
-    /* TRUE => sat removed from hash table */
-    return TRUE;
-}
-
 /** Reload satellites in view */
 static void reload_sats_in_child(GtkWidget * widget, GtkSatModule * module)
 {
@@ -1475,7 +1464,7 @@ void gtk_sat_module_reload_sats(GtkSatModule * module)
                 __func__, module->name);
 
     /* remove each element from the hash table, but keep the hash table */
-    g_hash_table_foreach_remove(module->satellites, empty, NULL);
+    g_hash_table_remove_all(module->satellites);
 
     /* reset event counter so that next AOS/LOS gets re-calculated */
     module->event_count = 0;

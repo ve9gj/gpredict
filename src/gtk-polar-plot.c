@@ -28,7 +28,7 @@
  *
  * GtkPolarPlot is a graphical widget that can display a satellite pass
  * in an Az/El polar plot. The widget was originally created to display
- * a single satellite pass in the detailed pass predicition dialog.
+ * a single satellite pass in the detailed pass prediction dialog.
  * 
  * Later, a few utility functions were added in order to make the GtkPolarPlot
  * more dynamic and useful in other contexts too. In addition to a satellite
@@ -63,8 +63,11 @@
 
 static GtkVBoxClass *parent_class = NULL;
 
-static void gtk_polar_plot_init(GtkPolarPlot * polview)
+static void gtk_polar_plot_init(GtkPolarPlot * polview,
+				gpointer g_class)
 {
+    (void)g_class;
+
     polview->qth = NULL;
     polview->pass = NULL;
     polview->size = 0;
@@ -89,9 +92,13 @@ static void gtk_polar_plot_destroy(GtkWidget * widget)
     (*GTK_WIDGET_CLASS(parent_class)->destroy) (widget);
 }
 
-static void gtk_polar_plot_class_init(GtkPolarPlotClass * class)
+static void gtk_polar_plot_class_init(GtkPolarPlotClass * class,
+				      gpointer class_data)
 {
     GtkWidgetClass *widget_class = (GtkWidgetClass *) class;
+
+    (void)class_data;
+
     parent_class = g_type_class_peek_parent(class);
     widget_class->destroy = gtk_polar_plot_destroy;
 }

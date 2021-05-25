@@ -83,17 +83,23 @@ static void gtk_polar_view_destroy(GtkWidget * widget)
     (*GTK_WIDGET_CLASS(parent_class)->destroy) (widget);
 }
 
-static void gtk_polar_view_class_init(GtkPolarViewClass * class)
+static void gtk_polar_view_class_init(GtkPolarViewClass * class,
+				      gpointer class_data)
 {
     GtkWidgetClass *widget_class = (GtkWidgetClass *) class;
+
+    (void)class_data;
 
     widget_class->destroy = gtk_polar_view_destroy;
 
     parent_class = g_type_class_peek_parent(class);
 }
 
-static void gtk_polar_view_init(GtkPolarView * polview)
+static void gtk_polar_view_init(GtkPolarView * polview,
+				gpointer g_class)
 {
+    (void)g_class;
+
     polview->sats = NULL;
     polview->qth = NULL;
     polview->obj = NULL;
@@ -606,13 +612,17 @@ static GooCanvasItemModel *create_canvas_model(GtkPolarView * polv)
 
     col = mod_cfg_get_int(polv->cfgdata,
                           MOD_CFG_POLAR_SECTION,
-                          MOD_CFG_POLAR_AXIS_COL, SAT_CFG_INT_POLAR_AXIS_COL);
+                          MOD_CFG_POLAR_BGD_COL, SAT_CFG_INT_POLAR_BGD_COL);
 
     polv->bgd = goo_canvas_rect_model_new(root, 0.0, 0.0,
                                           POLV_DEFAULT_SIZE, POLV_DEFAULT_SIZE,
-                                          "fill-color-rgba", 0xFFFFFFFF,
+                                          "fill-color-rgba", col,
                                           "stroke-color-rgba", 0xFFFFFFFF,
                                           NULL);
+
+    col = mod_cfg_get_int(polv->cfgdata,
+                          MOD_CFG_POLAR_SECTION,
+                          MOD_CFG_POLAR_AXIS_COL, SAT_CFG_INT_POLAR_AXIS_COL);
 
     /* Add elevation circles at 0, 30 and 60 deg */
     polv->C00 = goo_canvas_ellipse_model_new(root,
@@ -1554,7 +1564,7 @@ void gtk_polar_view_create_track(GtkPolarView * pv, sat_obj_t * obj,
         points->coords[2 * i] = (double)x;
         points->coords[2 * i + 1] = (double)y;
 
-        if (!(i % tres))
+        if (tres != 0 && !(i % tres))
         {
             /* create a time tick */
             if (ttidx < TRACK_TICK_NUM)

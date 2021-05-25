@@ -55,9 +55,12 @@ static void gtk_freq_knob_destroy(GtkWidget * widget)
     (*GTK_WIDGET_CLASS(parent_class)->destroy) (widget);
 }
 
-static void gtk_freq_knob_class_init(GtkFreqKnobClass * class)
+static void gtk_freq_knob_class_init(GtkFreqKnobClass * class,
+				     gpointer class_init)
 {
     GtkWidgetClass *widget_class;
+
+    (void)class_init;
 
     widget_class = (GtkWidgetClass *) class;
     parent_class = g_type_class_peek_parent(class);
@@ -74,13 +77,16 @@ static void gtk_freq_knob_class_init(GtkFreqKnobClass * class)
                                        G_TYPE_NONE, 0);
 }
 
-static void gtk_freq_knob_init(GtkFreqKnob * knob)
+static void gtk_freq_knob_init(GtkFreqKnob * knob,
+			       gpointer g_class)
 {
+    (void)g_class;
+
     knob->min = 0.0;
     knob->max = 9999999999.0;
 }
 
-static void    *gtk_freq_knob_update(GtkFreqKnob * knob)
+static gboolean gtk_freq_knob_update(GtkFreqKnob * knob)
 {
     gchar           b[11];
     gchar          *buff;

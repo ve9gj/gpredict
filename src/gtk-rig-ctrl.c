@@ -149,17 +149,23 @@ static void gtk_rig_ctrl_destroy(GtkWidget * widget)
     (*GTK_WIDGET_CLASS(parent_class)->destroy) (widget);
 }
 
-static void gtk_rig_ctrl_class_init(GtkRigCtrlClass * class)
+static void gtk_rig_ctrl_class_init(GtkRigCtrlClass * class,
+				    gpointer class_data)
 {
     GtkWidgetClass *widget_class;
+
+    (void)class_data;
 
     widget_class = (GtkWidgetClass *) class;
     parent_class = g_type_class_peek_parent(class);
     widget_class->destroy = gtk_rig_ctrl_destroy;
 }
 
-static void gtk_rig_ctrl_init(GtkRigCtrl * ctrl)
+static void gtk_rig_ctrl_init(GtkRigCtrl * ctrl,
+			      gpointer g_class)
 {
+    (void)g_class;
+
     ctrl->sats = NULL;
     ctrl->target = NULL;
     ctrl->pass = NULL;
@@ -2169,19 +2175,19 @@ static void exec_toggle_cycle(GtkRigCtrl * ctrl)
      */
     if (ctrl->conf->type == RIG_TYPE_TOGGLE_AUTO)
     {
-        GTimeVal        current_time;
+	gint64          current_time;
 
         /* get the current time */
-        g_get_current_time(&current_time);
+	current_time = g_get_real_time() / G_USEC_PER_SEC;
 
         if ((ctrl->last_toggle_tx == -1) ||
-            ((current_time.tv_sec - ctrl->last_toggle_tx) >= 10))
+            ((current_time - ctrl->last_toggle_tx) >= 10))
         {
             /* it's time to update TX freq */
             exec_toggle_tx_cycle(ctrl);
 
             /* store current time */
-            ctrl->last_toggle_tx = current_time.tv_sec;
+            ctrl->last_toggle_tx = current_time;
         }
     }
 }

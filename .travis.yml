@@ -1,6 +1,4 @@
-sudo: required
-
-dist: trusty
+dist: xenial
 
 language: c
 
@@ -16,4 +14,3 @@ before_install:
 script:
   - ./autogen.sh
   - make
-

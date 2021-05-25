@@ -384,9 +384,17 @@ static gboolean gpredict_app_config(GtkWidget * widget,
     w = gdk_screen_width();
     h = gdk_screen_height();
 #else
+    GdkWindow      *window;
+    GdkDisplay     *display;
+    GdkMonitor     *monitor;
     GdkRectangle    work_area;
-    gdk_monitor_get_workarea(gdk_display_get_primary_monitor(gdk_display_get_default()),
-                             &work_area);
+
+    /* https://gitlab.gnome.org/GNOME/gtk/-/issues/1028 */
+    window = gtk_widget_get_window(widget);
+    display = gtk_widget_get_display(widget);
+    monitor = gdk_display_get_monitor_at_window(display, window);
+    gdk_monitor_get_workarea(monitor, &work_area);
+
     w = work_area.width;
     h = work_area.height;
 #endif
@@ -422,8 +430,8 @@ static gboolean gpredict_app_config(GtkWidget * widget,
 static gboolean tle_mon_task(gpointer data)
 {
     /*GtkWidget *selector; */
-    glong           last, now, thrld;
-    GTimeVal        tval;
+    glong           last, thrld;
+    gint64          now;
     GtkWidget      *dialog;
     GError         *err = NULL;
 
@@ -439,8 +447,7 @@ static gboolean tle_mon_task(gpointer data)
     last = sat_cfg_get_int(SAT_CFG_INT_TLE_LAST_UPDATE);
 
     /* get current time */
-    g_get_current_time(&tval);
-    now = tval.tv_sec;
+    now = g_get_real_time() / G_USEC_PER_SEC;
 
     /* threshold */
     switch (sat_cfg_get_int(SAT_CFG_INT_TLE_AUTO_UPD_FREQ))
